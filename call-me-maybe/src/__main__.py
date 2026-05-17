@@ -2,7 +2,7 @@ import argparse
 from src.json_loaders import load_function_definition, load_prompt
 from src.constrained_decoding import build_system_prompt, load_vocab
 from llm_sdk.llm_sdk import Small_LLM_Model
-
+import numpy as np
 
 def arg_parser():
     parse = argparse.ArgumentParser(description="transalte from prompt to function calls...")
@@ -40,15 +40,23 @@ def main():
         raise Exception("No Prompt found")
     print("Building system prompts")
     system = build_system_prompt(func)
-    print(system)
     print(f"loading model: {args.model}")
     try:
         model = Small_LLM_Model(model_name=args.model)
     except OSError:
         raise Exception(f"Model {args.model} not found")
     vocab = load_vocab(model)
-    print(vocab)
 
+    full_prompt = f"User prompt : {prompt}\nAssistant:"
+    input_ids = model.encode(full_prompt)
+    gen_ids = input_ids[0].tolist()
+    all_gen = []
+    for _ in range(55):
+        logits = model.get_logits_from_input_ids(gen_ids)
+        next_id = int(np.argmax(logits))
+        gen_ids.append(next_id)
+        text = (model.decode([next_id]))
+        print(text, end="")
 
 if __name__ == "__main__":
     try:

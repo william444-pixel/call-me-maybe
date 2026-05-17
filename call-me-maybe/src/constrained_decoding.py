@@ -9,6 +9,7 @@ def load_vocab(model: Small_LLM_Model):
     raw_vocab = tok_data.get("model", {}).get("vocab", {})
     return raw_vocab
 
+
 def build_system_prompt(func):
     lines = [
         "STRICT SYSTEM RULE: Use ONLY a matching \
