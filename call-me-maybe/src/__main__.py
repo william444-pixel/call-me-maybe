@@ -94,5 +94,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except KeyboardInterrupt:
+        print(f"User stop the program")
     except Exception as e:
         print(f"Error: {e}")
