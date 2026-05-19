@@ -45,7 +45,7 @@ def main():
     print(f"loading model: {args.model}")
     try:
         model = Small_LLM_Model(model_name=args.model)
-    except OSError:
+    except Exception:
         raise Exception(f"Model {args.model} not found")
     vocab = load_vocab(model)
     valid_ids = build_json_valid_ids(vocab)
@@ -61,31 +61,31 @@ def main():
         all_gen = []
         all_gen.extend(model.encode('{"name": "')[0].tolist())
         for _ in range(55):
-          logits = model.get_logits_from_input_ids(gen_ids + all_gen)
-          next_id = get_valid_tokens(logits, valid_ids)
-          all_gen.append(next_id)
-          text = model.decode(all_gen)
-          print(text, end="\n",flush=True)
-          clean_json = extract_clean_json(text)
-          if clean_json:
+            logits = model.get_logits_from_input_ids(gen_ids + all_gen)
+            next_id = get_valid_tokens(logits, valid_ids)
+            all_gen.append(next_id)
+            text = model.decode(all_gen)
+            print(text, end="\n", flush=True)
+            clean_json = extract_clean_json(text)
+            if clean_json:
                 try:
                   line_clean_json = json.loads(clean_json)
                   break
                 except Exception:
                  pass
         if not clean_json:
-            line_clean_json = {"name": "none", "args": {}}
+            line_clean_json = {"name": "none", "parameters": {}}
         all_results.append({
             "prompt": prompt,
             "name": line_clean_json.get("name", "none"),
-            "args": line_clean_json.get("args", ())
+            "parameters": line_clean_json.get("parameters", ())
         })
         if line_clean_json.get("name") != "none":
             print(f"[succes]")
         else:
             print(f" -> [ERROR] Could not generate function call")
-    
-    
+
+
     clean_output = [result for result in all_results if result["name"] != "none"]
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:

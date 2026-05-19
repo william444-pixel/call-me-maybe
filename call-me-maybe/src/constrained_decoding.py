@@ -17,7 +17,8 @@ def get_valid_tokens(logits, valid_id):
     return max(valid_id, key=lambda i:logits[i] if i < len(logits) else float('-inf'))
 
 def build_json_valid_ids(vocab):
-    json_safe = set('abcdefghijklmnopqrstuvwxyz''0123456789*_,:-+/\?()[]{}"ĠĊ')
+    up = "abcdefghijklmnopqrstuvwxyz".upper()
+    json_safe = set(up + 'abcdefghijklmnopqrstuvwxyz''0123456789*_,.:-+/\?()[]{}"ĠĊ')
     valid = set()
     for token_str, token_id in vocab.items():
         if token_str and all(c in json_safe for c in token_str):
@@ -48,5 +49,5 @@ def build_system_prompt(func):
             for name, info in fn.parameters.items()
         )
         lines.append(f"  -{fn.name}({params}): {fn.description}")
-    lines.append('\nOutput ONLY valid JSON: {"name": "<fn>", "args":{<arg>}}')
+    lines.append('\nOutput ONLY valid JSON: {"name": "<fn>", "parameters":{<arg>}}')
     return "\n".join(lines)
