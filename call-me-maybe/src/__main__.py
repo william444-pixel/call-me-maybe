@@ -1,13 +1,28 @@
 import argparse
-from src.json_loaders import load_function_definition, load_prompt
-from src.constrained_decoding import build_system_prompt, load_vocab, build_json_valid_ids, get_valid_tokens, extract_clean_json
-from llm_sdk.llm_sdk import Small_LLM_Model
-import numpy as np
 import json
 import os
+from typing import Any, Dict, List
+from src.json_loaders import load_function_definition, load_prompt
+from src.constrained_decoding import (
+    build_json_valid_ids,
+    build_system_prompt,
+    extract_clean_json,
+    get_valid_tokens,
+    load_vocab,
+)
+from llm_sdk.llm_sdk import Small_LLM_Model
 
-def arg_parser():
-    parse = argparse.ArgumentParser(description="transalte from prompt to function calls...")
+
+def arg_parser() -> argparse.Namespace:
+    """Parses command line arguments for the function calling
+    generation script.
+
+    Returns:
+        argparse.Namespace: The parsed command line arguments containing paths
+            for input, functions definition, output, and the model name.
+    """
+    parse = argparse.ArgumentParser(
+        description="transalte from prompt to function calls...")
     parse.add_argument(
         "--input",
         type=str,
@@ -31,7 +46,12 @@ def arg_parser():
     return parse.parse_args()
 
 
-def main():
+def main() -> None:
+    """Main execution function that runs the constrained decoding pipeline
+
+    to translate user prompts into valid, structured function calling
+    JSON outputs.
+    """
     print("Starting functions and prompts")
     args = arg_parser()
     func = load_function_definition(args.functions_definition)
@@ -49,7 +69,7 @@ def main():
         raise Exception(f"Model {args.model} not found")
     vocab = load_vocab(model)
     valid_ids = build_json_valid_ids(vocab)
-    all_results = []
+    all_results: List[Dict[str, Any]] = []
     for p in prompts:
         prompt = p.prompt
         print(f"Processing prompt: {prompt}")
@@ -60,7 +80,7 @@ def main():
         clean_json = None
         all_gen = []
         all_gen.extend(model.encode('{"name": "')[0].tolist())
-        for _ in range(55):
+        for _ in range(100):
             logits = model.get_logits_from_input_ids(gen_ids + all_gen)
             next_id = get_valid_tokens(logits, valid_ids)
             all_gen.append(next_id)
@@ -69,10 +89,10 @@ def main():
             clean_json = extract_clean_json(text)
             if clean_json:
                 try:
-                  line_clean_json = json.loads(clean_json)
-                  break
+                    line_clean_json = json.loads(clean_json)
+                    break
                 except Exception:
-                 pass
+                    pass
         if not clean_json:
             line_clean_json = {"name": "none", "parameters": {}}
         all_results.append({
@@ -81,20 +101,21 @@ def main():
             "parameters": line_clean_json.get("parameters", ())
         })
         if line_clean_json.get("name") != "none":
-            print(f"[succes]")
+            print("[succes]")
         else:
-            print(f" -> [ERROR] Could not generate function call")
+            print(" -> [ERROR] Could not generate function call")
 
-
-    clean_output = [result for result in all_results if result["name"] != "none"]
+    clean_output = [
+        result for result in all_results if result["name"] != "none"]
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(clean_output, f, ensure_ascii=False, indent=2)
+
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print(f"User stop the program")
+        print("User stop the program")
     except Exception as e:
         print(f"Error: {e}")
