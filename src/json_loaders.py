@@ -20,7 +20,7 @@ def load_function_definition(path: str) -> List[FunctionDefinition]:
         or contains malformed JSON syntax.
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r") as f:
             data = json.load(f)
             return [FunctionDefinition(**item) for item in data]
     except FileNotFoundError:
@@ -45,7 +45,7 @@ def load_prompt(path: str) -> List[Prompts]:
         malformed JSON syntax.
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r") as f:
             data = json.load(f)
             return [Prompts(**item) for item in data]
     except FileNotFoundError:

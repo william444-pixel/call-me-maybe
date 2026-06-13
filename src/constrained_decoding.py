@@ -38,6 +38,7 @@ def get_valid_tokens(logits: List[float], valid_id: Set[int]) -> int:
     Returns:
         int: The selected token ID with the maximum logit score.
     """
+
     return max(valid_id, key=lambda i: logits[i] if i < len(logits)
                else float('-inf'))
 
@@ -53,7 +54,16 @@ def build_json_valid_ids(vocab: Dict[str, int]) -> Set[int]:
     """
     up = "abcdefghijklmnopqrstuvwxyz".upper()
     json_safe = set(
-        up + 'abcdefghijklmnopqrstuvwxyz''0123456789*_,.:-+\\/?()[]{}"ĠĊ')
+        up + "abcdefghijklmnopqrstuvwxyz'"'0123456789*_,.:-+\\/?()[]{}"ĠĊ')
+    valid = set()
+    for token_str, token_id in vocab.items():
+        if token_str and all(c in json_safe for c in token_str):
+            valid.add(token_id)
+    return valid
+
+
+def get_numeric_mask_numpy(vocab: Dict[str, int]):
+    json_safe = set('0123456789.,}-')
     valid = set()
     for token_str, token_id in vocab.items():
         if token_str and all(c in json_safe for c in token_str):
@@ -72,10 +82,22 @@ def load_vocab(model: Small_LLM_Model) -> Dict[str, int]:
         Dict[str, int]: The raw vocabulary dictionary.
     """
     vocab_path = model.get_path_to_tokenizer_file()
-    with open(vocab_path, "r", encoding="utf-8") as f:
+    with open(vocab_path, "r") as f:
         tok_data = json.load(f)
     raw_vocab = tok_data.get("model", {}).get("vocab", {})
     return dict(raw_vocab)
+
+
+def cast_numbers_to_float(params_dict: dict) -> dict:
+    """Forces all numerical integers to floats
+    to satisfy strict evaluation types."""
+    if not isinstance(params_dict, dict):
+        return params_dict
+
+    for key, val in params_dict.items():
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            params_dict[key] = float(val)
+    return params_dict
 
 
 def build_system_prompt(func: List[Any]) -> str:
