@@ -1,5 +1,6 @@
 import argparse
 import json
+import numpy as np
 import os
 from typing import Any, Dict, List
 from src.json_loaders import load_function_definition, load_prompt
@@ -69,15 +70,12 @@ def main() -> None:
         line_clean_json = ""
         prompt = p.prompt
         print(f"Processing prompt: {prompt}")
-        full_prompt = f"{system}\n\nUser prompt: {prompt}\nAssistant:"
-        input_ids = model.encode(full_prompt)
-        gen_ids = input_ids[0].tolist()
+        full_prompt = f'{system}\n\nUser prompt: {prompt}\nAssistant: {{"name": '
+        tokens = model.encode(full_prompt)[0].tolist()
         clean_json = None
-        all_gen = []
-        all_gen.extend(model.encode('{"name": "')[0].tolist())
-        for _ in range(100):
-            logits = model.get_logits_from_input_ids(gen_ids + all_gen)
-            text = model.decode(all_gen)
+        while True:
+            logits = np.array(model.get_logits_from_input_ids(tokens))
+            text = model.decode(tokens)
             current_param_is_numeric = False
             for param_name, param_type in functions.parameters.items():
                 print(param_type.type.lower())
@@ -88,69 +86,75 @@ def main() -> None:
                     "integer",
                 ]:
                     after_param = text.split(f'"{param_name}":')[-1]
+                    current_param_is_numeric = True
             if current_param_is_numeric:
                 print("ok!!!!")
                 masked_logits = get_numeric_mask_numpy(vocab)
                 next_id = get_valid_tokens(logits, masked_logits)
+                print("model.decode: ", model.decode(next_id))
             else:
                 next_id = get_valid_tokens(logits, valid_ids)
-            all_gen.append(next_id)
-            text = model.decode(all_gen)
-            if current_param_is_numeric and param_type.type.lower() in [
-                "number",
-                "float",
-            ]:
-                # Get the updated text after appending the new token
-                updated_after_param = text.split(f'"{param_name}":')[-1].strip()
+            tokens.append(next_id)
+            text = model.decode(tokens)
 
-                # If the new token is a comma or a closing brace, it means generation of this number IS DONE
-                if "," in updated_after_param or "}" in updated_after_param:
+            if "}" in text[-1]:
+                print(text)
+                break
+            # if current_param_is_numeric and param_type.type.lower() in [
+            #     "number",
+            #     "float",
+            # ]:
+            # Get the updated text after appending the new token
+            # updated_after_param = text.split(f'"{param_name}":')[-1].strip()
 
-                    # Check if the number was generated WITHOUT a decimal point (e.g., "2" instead of "2.5")
-                    # We look at the text BEFORE the comma/brace was added
-                    if "." not in after_param:
-                        # Pop the structural token (comma or brace) temporarily
-                        last_structural_token = all_gen.pop()
+            # If the new token is a comma or a closing brace, it means generation of this number IS DONE
+            # if "," in updated_after_param or "}" in updated_after_param:
 
-                        # Force insert the ".0" safely at the end of the number
-                        all_gen.extend(model.encode(".0")[0].tolist())
+            # Check if the number was generated WITHOUT a decimal point (e.g., "2" instead of "2.5")
+            # We look at the text BEFORE the comma/brace was added
+            # if "." not in after_param:
+            #     # Pop the structural token (comma or brace) temporarily
+            #     last_structural_token = all_gen.pop()
 
-                        # Put back the structural token to close the parameter correctly
-                        all_gen.append(last_structural_token)
+            #     # Force insert the ".0" safely at the end of the number
+            #     all_gen.extend(model.encode(".0")[0].tolist())
 
-                        # Update the final text string
-                        text = model.decode(all_gen)
+            #     # Put back the structural token to close the parameter correctly
+            #     all_gen.append(last_structural_token)
+
+            # Update the final text string
+            # text = model.decode(all_gen)
             print(text, end="\n", flush=True)
-            clean_json = extract_clean_json(text)
-            if clean_json:
-                try:
-                    line_clean_json = json.loads(clean_json)
-                    print(line_clean_json)
-                    break
-                except Exception:
-                    pass
-        if not clean_json or not isinstance(line_clean_json, dict):
-            all_gen.extend(model.encode("}}")[0].tolist())
-            logits = model.get_logits_from_input_ids(gen_ids + all_gen)
-            text = model.decode(all_gen)
-            clean_json = extract_clean_json(text)
-            line_clean_json = json.loads(clean_json)
-        all_results.append(
-            {
-                "prompt": prompt,
-                "name": line_clean_json.get("name", "none"),
-                "parameters": line_clean_json.get("parameters", {}),
-            }
-        )
-        if line_clean_json.get("name") != "none":
-            print("[succes]")
-        else:
-            print(" -> [ERROR] Could not generate function call")
+            # clean_json = extract_clean_json(text)
+            # if clean_json:
+            #     try:
+            #         line_clean_json = json.loads(clean_json)
+            #         print(line_clean_json)
+            #         break
+            #     except Exception:
+            #         pass
+        # if not clean_json or not isinstance(line_clean_json, dict):
+        #     tokens.extend(model.encode("}}")[0].tolist())
+        #     logits = model.get_logits_from_input_ids(tokens)
+        #     text = model.decode(tokens)
+        #     clean_json = extract_clean_json(text)
+        #     line_clean_json = json.loads(clean_json)
+        # all_results.append(
+        #     {
+        #         "prompt": prompt,
+        #         "name": line_clean_json.get("name", "none"),
+        #         "parameters": line_clean_json.get("parameters", {}),
+        #     }
+        # )
+        # if line_clean_json.get("name") != "none":
+        #     print("[succes]")
+        # else:
+        #     print(" -> [ERROR] Could not generate function call")
 
-    clean_output = [result for result in all_results if result["name"] != "none"]
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    with open(args.output, "w") as f:
-        json.dump(clean_output, f, ensure_ascii=False, indent=2)
+    # clean_output = [result for result in all_results if result["name"] != "none"]
+    # os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    # with open(args.output, "w") as f:
+    #     json.dump(clean_output, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
