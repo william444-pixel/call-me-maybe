@@ -15,7 +15,7 @@ def extract_clean_json(text: str) -> Optional[str]:
         Optional[str]: The extracted clean JSON string
         if found, otherwise None.
     """
-    start = text.find("{")
+    start = text.find("z{")
     if start == -1:
         return None
     count = 0
@@ -25,11 +25,11 @@ def extract_clean_json(text: str) -> Optional[str]:
         if text[i] == "}":
             count -= 1
         if count == 0:
-            return text[start : i + 1]
+            return text[start: i + 1]
     return None
 
 
-def get_valid_tokens(logits: np, valid_id: Set[int]) -> int:
+def get_valid_tokens(logits: np.ndarray, valid_id: Set[int]) -> int:
     """Finds the token ID from valid_id that has the highest score in logits.
 
     Args:
@@ -39,10 +39,10 @@ def get_valid_tokens(logits: np, valid_id: Set[int]) -> int:
     Returns:
         int: The selected token ID with the maximum logit score.
     """
-    mask_logits = np.full_like(len(logits), -np.inf)
+    mask_logits = np.full_like(logits, -np.inf)
     for id in valid_id:
         mask_logits[id] = logits[id]
-    return mask_logits
+    return np.argmax(mask_logits)
 
 
 def build_json_valid_ids(vocab: Dict[int, str]) -> Set[int]:

@@ -69,37 +69,44 @@ def main() -> None:
     for p in prompts:
         line_clean_json = ""
         prompt = p.prompt
+        schema_parameters = {}
         print(f"Processing prompt: {prompt}")
         full_prompt = f'{system}\n\nUser prompt: {prompt}\nAssistant: {{"name": '
         tokens = model.encode(full_prompt)[0].tolist()
         clean_json = None
         while True:
+            is_finish = False
             logits = np.array(model.get_logits_from_input_ids(tokens))
             text = model.decode(tokens)
             current_param_is_numeric = False
-            for param_name, param_type in functions.parameters.items():
-                print(param_type.type.lower())
-                print(param_name)
-                if f'"{param_name}":' in text and param_type.type.lower() in [
-                    "number",
-                    "float",
-                    "integer",
-                ]:
-                    after_param = text.split(f'"{param_name}":')[-1]
-                    current_param_is_numeric = True
+            schema_parameters = functions.parameters.copy()
+            if is_finish:
+                for param_name, param_type in schema_parameters.items():
+                    print(param_type.type.lower())
+                    print(param_name)
+                    if f'"{param_name}": ' in text and param_type.type.lower() in [
+                        "number",
+                        "float",
+                        "integer",
+                    ]:
+                        after_param = text.split(f'"{param_name}":')[-1]
+                        del schema_parameters[param_name]
+                        current_param_is_numeric = True
             if current_param_is_numeric:
-                print("ok!!!!")
+                print("is a number")
                 masked_logits = get_numeric_mask_numpy(vocab)
                 next_id = get_valid_tokens(logits, masked_logits)
-                print("model.decode: ", model.decode(next_id))
             else:
+                print("the next parameter")
                 next_id = get_valid_tokens(logits, valid_ids)
             tokens.append(next_id)
             text = model.decode(tokens)
-
             if "}" in text[-1]:
                 print(text)
                 break
+            if "," in text:
+                is_finish = True
+
             # if current_param_is_numeric and param_type.type.lower() in [
             #     "number",
             #     "float",
@@ -124,7 +131,7 @@ def main() -> None:
 
             # Update the final text string
             # text = model.decode(all_gen)
-            print(text, end="\n", flush=True)
+            print(text[text.find(f"prompt: {prompt}"):], end="\n", flush=True)
             # clean_json = extract_clean_json(text)
             # if clean_json:
             #     try:
@@ -133,28 +140,32 @@ def main() -> None:
             #         break
             #     except Exception:
             #         pass
-        # if not clean_json or not isinstance(line_clean_json, dict):
-        #     tokens.extend(model.encode("}}")[0].tolist())
-        #     logits = model.get_logits_from_input_ids(tokens)
-        #     text = model.decode(tokens)
-        #     clean_json = extract_clean_json(text)
-        #     line_clean_json = json.loads(clean_json)
-        # all_results.append(
-        #     {
-        #         "prompt": prompt,
-        #         "name": line_clean_json.get("name", "none"),
-        #         "parameters": line_clean_json.get("parameters", {}),
-        #     }
-        # )
-        # if line_clean_json.get("name") != "none":
-        #     print("[succes]")
-        # else:
-        #     print(" -> [ERROR] Could not generate function call")
+        print("clean: ", clean_json)
+        if not clean_json or not isinstance(line_clean_json, dict):
+            print("no clean")
+            tokens.extend(model.encode("}}")[0].tolist())
+            logits = model.get_logits_from_input_ids(tokens)
+            text = model.decode(tokens)
+            print(text)
+            clean_json = extract_clean_json(text)
+            print(clean_json)
+            line_clean_json = json.loads(clean_json)
+        all_results.append(
+            {
+                "prompt": prompt,
+                "name": line_clean_json.get("name", "none"),
+                "parameters": line_clean_json.get("parameters", {}),
+            }
+        )
+        if line_clean_json.get("name") != "none":
+            print("[succes]")
+        else:
+            print(" -> [ERROR] Could not generate function call")
 
-    # clean_output = [result for result in all_results if result["name"] != "none"]
-    # os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    # with open(args.output, "w") as f:
-    #     json.dump(clean_output, f, ensure_ascii=False, indent=2)
+    clean_output = [result for result in all_results if result["name"] != "none"]
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    with open(args.output, "w") as f:
+        json.dump(clean_output, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
