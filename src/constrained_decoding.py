@@ -1,7 +1,6 @@
 from llm_sdk.llm_sdk import Small_LLM_Model
 import json
 from typing import Any, Dict, List, Optional, Set
-import numpy as np
 
 
 def extract_clean_json(text: str) -> Optional[str]:
@@ -15,7 +14,7 @@ def extract_clean_json(text: str) -> Optional[str]:
         Optional[str]: The extracted clean JSON string
         if found, otherwise None.
     """
-    start = text.find("z{")
+    start = text.find("{")
     if start == -1:
         return None
     count = 0
@@ -25,11 +24,11 @@ def extract_clean_json(text: str) -> Optional[str]:
         if text[i] == "}":
             count -= 1
         if count == 0:
-            return text[start: i + 1]
+            return text[start:i+1]
     return None
 
 
-def get_valid_tokens(logits: np.ndarray, valid_id: Set[int]) -> int:
+def get_valid_tokens(logits: List[float], valid_id: Set[int]) -> int:
     """Finds the token ID from valid_id that has the highest score in logits.
 
     Args:
@@ -39,13 +38,11 @@ def get_valid_tokens(logits: np.ndarray, valid_id: Set[int]) -> int:
     Returns:
         int: The selected token ID with the maximum logit score.
     """
-    mask_logits = np.full_like(logits, -np.inf)
-    for id in valid_id:
-        mask_logits[id] = logits[id]
-    return np.argmax(mask_logits)
+    return max(valid_id, key=lambda i: logits[i] if i < len(logits)
+               else float('-inf'))
 
 
-def build_json_valid_ids(vocab: Dict[int, str]) -> Set[int]:
+def build_json_valid_ids(vocab: Dict[str, int]) -> Set[int]:
     """Filters the vocabulary to keep only JSON-safe tokens.
 
     Args:
@@ -55,7 +52,8 @@ def build_json_valid_ids(vocab: Dict[int, str]) -> Set[int]:
         Set[int]: A set of valid token IDs that contain only safe characters.
     """
     up = "abcdefghijklmnopqrstuvwxyz".upper()
-    json_safe = set(up + "abcdefghijklmnopqrstuvwxyz'\"0123456789*_,.:-+\\/?()[]{} ")
+    json_safe = set(
+        up + 'abcdefghijklmnopqrstuvwxyz''0123456789*_,.:-+\\/?()[]{}"ĠĊ')
     valid = set()
     for token_str, token_id in vocab.items():
         if token_str and all(c in json_safe for c in token_str):
@@ -63,16 +61,7 @@ def build_json_valid_ids(vocab: Dict[int, str]) -> Set[int]:
     return valid
 
 
-def get_numeric_mask_numpy(vocab: Dict[str, int]):
-    json_safe = set("0123456789.,}- ")
-    valid = set()
-    for token_str, token_id in vocab.items():
-        if token_str and all(c in json_safe for c in token_str):
-            valid.add(token_id)
-    return valid
-
-
-def load_vocab(model: Small_LLM_Model) -> Dict[int, str]:
+def load_vocab(model: Small_LLM_Model) -> Dict[str, int]:
     """Loads the raw vocabulary dictionary from the model's tokenizer file.
 
     Args:
@@ -80,15 +69,13 @@ def load_vocab(model: Small_LLM_Model) -> Dict[int, str]:
         tokenizer path.
 
     Returns:
-        Dict[int, str]: The raw vocabulary dictionary.
+        Dict[str, int]: The raw vocabulary dictionary.
     """
-    clean_vocab = dict()
-    vocab_path = model.get_path_to_vocab_file()
-    with open(vocab_path, "r") as f:
-        data = json.load(f)
-    for _, token_id in data.items():
-        clean_vocab[model.decode(token_id)] = token_id
-    return clean_vocab
+    vocab_path = model.get_path_to_tokenizer_file()
+    with open(vocab_path, "r", encoding="utf-8") as f:
+        tok_data = json.load(f)
+    raw_vocab = tok_data.get("model", {}).get("vocab", {})
+    return dict(raw_vocab)
 
 
 def cast_numbers_to_float(params_dict: dict) -> dict:
@@ -113,19 +100,12 @@ def build_system_prompt(func: List[Any]) -> str:
     Returns:
         str: The formatted system prompt.
     """
-    lines = [
-        "STRICT SYSTEM RULE: Use ONLY a matching \
-            functions from the list bellow.",
-        'IF NO functions matches the user\'s intent \
-            (even if type match), set name: "None".',
-        "Never use an unrelated function for a different task.",
-        "",
-        "Available functions:",
-    ]
+    
+    lines = ['tools\n{"name":"']
     for fn in func:
         params = ", ".join(
-            f"{name}: {info.type}" for name, info in fn.parameters.items()
+            f"{name}: {info.type}"
+            for name, info in fn.parameters.items()
         )
         lines.append(f"  -{fn.name}({params}): {fn.description}")
-    lines.append('\nOutput ONLY valid JSON: {"name": "<fn>", "parameters":{<arg>}}')
     return "\n".join(lines)
