@@ -71,6 +71,21 @@ def get_allowed_ids_for_strings(
         allowed_ids.append(token_id)
     return allowed_ids
 
+def get_allowed_ids_for_numbers(
+    clean_vocab: dict[int, str], is_last: bool
+) -> list[int]:
+    """Return token IDs that are safe to emit while generating a numeric
+    JSON value.  When is_last=True the value is terminated by `}`;
+    otherwise it is terminated by `,`."""
+    allowed_ids: list[int] = []
+    allowed_chars = set("0123456789.-}") if is_last else set("0123456789.-,")
+    for token_id, token_text in clean_vocab.items():
+        if (not token_text or token_text.count("}") > 1
+                or token_text.count(",") > 1):
+            continue
+        if all(char in allowed_chars for char in token_text):
+            allowed_ids.append(token_id)
+    return allowed_ids
 
 def is_valid_numeric_token(
     token_text: str, gen: str, remaining_params: list
@@ -116,7 +131,7 @@ def main():
     total_start = time.perf_counter()
     final_results = []
     list_alloweds_of_functions = []
-    schema_parametres = {}
+    schema_parameters = {}
 
     functions_tools_list = load_function_definition(args.functions_definition)
     prompts_list = load_prompt(args.input)
@@ -166,12 +181,21 @@ def main():
                     clean_vocab, gen, list_alloweds_of_functions
                 )
             elif state == "PARAM_KEY":
-                keys = [f'"{key}":' for key in schema_parametres.keys()]
+                keys = [f'"{key}":' for key in schema_parameters.keys()]
                 allowed_ids = get_tokens_allowed_ids(clean_vocab, gen, keys)
             elif state == "PARAM_VALUE":
-                for key, type in schema_parametres.items():
-
-                    allowed_ids = get_tokens_allowed_ids(clean_vocab, gen, ['":'])
+                is_last_param = len(schema_parameters) == 1
+                if current_key in schema_parameters:
+                    param_type = schema_parameters[current_key].type
+                    if param_type == "string":
+                        allowed_ids = get_allowed_ids_for_strings(
+                            clean_vocab, is_last_param
+                        )
+                    elif param_type in ("number", "integer", "int"):
+                        allowed_ids = get_allowed_ids_for_numbers(
+                            clean_vocab, is_last_param
+                        )
+                    
 
             masked_logits = get_mask_logits(allowed_ids, logits)
             next_token = int(np.argmax(masked_logits))
@@ -185,19 +209,40 @@ def main():
                 if gen in list_alloweds_of_functions:
                     tokens.extend(parametre_injection)
                     matched_function_name = gen
-                    schema_parametres = list_of_functions[matched_function_name].parameters
+                    schema_parameters = list_of_functions[matched_function_name].parameters.copy()
                     gen = ""
                     state = "PARAM_KEY"
 
             elif state == "PARAM_KEY":
-                if 
+                if gen in [f'"{key}":' for key in schema_parameters.keys()]:
+                    current_key = gen.split('"')[1]
+                    gen = ""
+                    state = "PARAM_VALUE"
 
             elif state == "PARAM_VALUE":
-                if gen in remaining_parameters:
-                    current_key = gen
-                    remaining_parameters.remove(gen)
-                    gen = ""
-                    state = "PARAM_KEY"
+                current_type = schema_parameters[current_key].type
+                is_value_complete = False
+                if current_type in ["number", "boolean", "integer"]:
+                    if "," in gen or "}" in gen:
+                        is_value_complete = True
+                    ending_part = gen
+                elif current_type == "string":
+                    clean_gen = gen.replace('\\"', "")
+                    ending_part = clean_gen.split('"')[-1]
+                    if clean_gen.count('"') >= 2 and (
+                        "," in clean_gen.split('"')[-1]
+                        or "}" in clean_gen.split('"')[-1]
+                    ):
+                        is_value_complete = True
+                if is_value_complete:
+                    if "," in gen:
+                        del schema_parameters[current_key]
+                        gen = ""
+                        state = "PARAM_KEY" if schema_parameters else "END"
+                    elif "}" in gen:
+                        if ending_part.count("}") == 1:
+                            tokens.extend(end_obj_injection)
+                        state = "END"
 
         # --- POST-PROCESSING & EXTRACTION LAYER ---
         result_raw = model.decode(tokens)
@@ -207,8 +252,7 @@ def main():
             if json_start_index == -1:
                 raise ValueError("JSON start object not found.")
 
-            safe_user_prompt_json = json.dumps(raw_prompt_text)
-            clean_json_str = f'{{"prompt":{safe_user_prompt_json},'
+            clean_json_str = f'{{"prompt":{raw_prompt_text},'
             clean_json_str += result_raw[json_start_index:]
 
             parsed_json = json.loads(clean_json_str)
