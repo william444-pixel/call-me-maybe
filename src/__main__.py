@@ -5,7 +5,13 @@ import time
 from llm_sdk.llm_sdk import Small_LLM_Model
 import numpy as np
 from src.json_loaders import load_function_definition, load_prompt
-from pprint import pprint
+from src.constrained_decoding import (
+    get_mask_logits,
+    get_allowed_ids_for_numbers,
+    get_allowed_ids_for_strings,
+    build_clean_vocab,
+    get_tokens_allowed_ids,
+)
 
 def arg_parser() -> argparse.Namespace:
     parse = argparse.ArgumentParser(
@@ -24,107 +30,6 @@ def arg_parser() -> argparse.Namespace:
     )
     parse.add_argument("--model", type=str, default="Qwen/Qwen3-0.6B")
     return parse.parse_args()
-
-
-def build_clean_vocab(model: Small_LLM_Model) -> dict[int, str]:
-    vocabulary = dict()
-    with open(model.get_path_to_vocab_file(), "r") as f:
-        vocabulary = json.load(f)
-    clean_vocab: dict[int, str] = {}
-    for _, token_id in vocabulary.items():
-        clean_vocab[token_id] = model.decode(token_id)
-    return clean_vocab
-
-
-def get_tokens_allowed_ids(
-    clean_vocab: dict[int, str], gen: str, list_target: list[str]
-):
-    allowed_ids = []
-    for token_id, token_text in clean_vocab.items():
-        text_target = gen + token_text
-        for target in list_target:
-            if target.startswith(text_target):
-                allowed_ids.append(token_id)
-                break
-    return allowed_ids
-
-def get_allowed_ids_for_strings(
-    clean_vocab: dict[int, str], is_last: bool
-) -> list[int]:
-    """Return token IDs that are safe to emit while generating a string
-    JSON value.  After the closing quote only structural characters are
-    allowed.  When is_last=True the value ends with `}`; otherwise `,`."""
-    allowed_ids: list[int] = []
-    for token_id, token_text in clean_vocab.items():
-        if not token_text:
-            continue
-        if "\n" in token_text or "\r" in token_text:
-            continue
-        unescaped_text = token_text.replace('\\"', "")
-        if '"' in unescaped_text:
-            after_quote = unescaped_text[unescaped_text.find('"') + 1:]
-            allowed_closing = "} " if is_last else ", "
-            if any(char not in allowed_closing for char in after_quote):
-                continue
-            if after_quote.count("}") > 1 or after_quote.count(",") > 1:
-                continue
-        allowed_ids.append(token_id)
-    return allowed_ids
-
-def get_allowed_ids_for_numbers(
-    clean_vocab: dict[int, str], is_last: bool
-) -> list[int]:
-    """Return token IDs that are safe to emit while generating a numeric
-    JSON value.  When is_last=True the value is terminated by `}`;
-    otherwise it is terminated by `,`."""
-    allowed_ids: list[int] = []
-    allowed_chars = set("0123456789.-}") if is_last else set("0123456789.-,")
-    for token_id, token_text in clean_vocab.items():
-        if (not token_text or token_text.count("}") > 1
-                or token_text.count(",") > 1):
-            continue
-        if all(char in allowed_chars for char in token_text):
-            allowed_ids.append(token_id)
-    return allowed_ids
-
-def is_valid_numeric_token(
-    token_text: str, gen: str, remaining_params: list
-) -> bool:
-    full_str = gen + token_text
-    if full_str.endswith(","):
-        if len(remaining_params) == 0:
-            return False
-        num_part = full_str[:-1]
-    elif full_str.endswith("}"):
-        num_part = full_str[:-1]
-    else:
-        num_part = full_str
-
-    if not num_part:
-        return len(gen) > 0
-    if not all(c in "0123456789.-" for c in num_part):
-        return False
-    if num_part.count(".") > 1 or num_part.count("-") > 1:
-        return False
-    return True
-
-
-def get_mask_logits(allowed_ids, logits):
-    mask_logits = np.full_like(logits, -np.inf)
-    for allowed_id in allowed_ids:
-        mask_logits[allowed_id] = logits[allowed_id]
-    return mask_logits
-
-
-def is_currently_escaped(s):
-    count = 0
-    for char in reversed(s):
-        if char == '\\':
-            count += 1
-        else:
-            break
-    return count % 2 == 1
-
 
 def main():
     args = arg_parser()
@@ -280,7 +185,7 @@ def main():
             print(f"[-] CRITICAL ERROR on prompt: {raw_prompt_text}")
             print(f"Error details: {e}")
             final_results.append(
-                {"prompt": raw_prompt_text, "name": None, "parameters": {}}
+                {"prompt": json.loads(raw_prompt_text), "name": None, "parameters": {}}
             )
 
     output_path = args.output

@@ -1,111 +1,70 @@
 from llm_sdk.llm_sdk import Small_LLM_Model
 import json
 from typing import Any, Dict, List, Optional, Set
+import numpy as np
 
 
-def extract_clean_json(text: str) -> Optional[str]:
-    """Extracts the first complete balanced JSON object
-    enclosed in curly braces.
+def get_mask_logits(allowed_ids, logits):
+    mask_logits = np.full_like(logits, -np.inf)
+    for allowed_id in allowed_ids:
+        mask_logits[allowed_id] = logits[allowed_id]
+    return mask_logits
 
-    Args:
-        text (str): The raw text string containing the potential JSON object.
+def get_allowed_ids_for_numbers(
+    clean_vocab: dict[int, str], is_last: bool
+) -> list[int]:
+    """Return token IDs that are safe to emit while generating a numeric
+    JSON value.  When is_last=True the value is terminated by `}`;
+    otherwise it is terminated by `,`."""
+    allowed_ids: list[int] = []
+    allowed_chars = set("0123456789.-}") if is_last else set("0123456789.-,")
+    for token_id, token_text in clean_vocab.items():
+        if (not token_text or token_text.count("}") > 1
+                or token_text.count(",") > 1):
+            continue
+        if all(char in allowed_chars for char in token_text):
+            allowed_ids.append(token_id)
+    return allowed_ids
 
-    Returns:
-        Optional[str]: The extracted clean JSON string
-        if found, otherwise None.
-    """
-    start = text.find("{")
-    if start == -1:
-        return None
-    count = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            count += 1
-        if text[i] == "}":
-            count -= 1
-        if count == 0:
-            return text[start:i+1]
-    return None
+def get_allowed_ids_for_strings(
+    clean_vocab: dict[int, str], is_last: bool
+) -> list[int]:
+    """Return token IDs that are safe to emit while generating a string
+    JSON value.  After the closing quote only structural characters are
+    allowed.  When is_last=True the value ends with `}`; otherwise `,`."""
+    allowed_ids: list[int] = []
+    for token_id, token_text in clean_vocab.items():
+        if not token_text:
+            continue
+        if "\n" in token_text or "\r" in token_text:
+            continue
+        unescaped_text = token_text.replace('\\"', "")
+        if '"' in unescaped_text:
+            after_quote = unescaped_text[unescaped_text.find('"') + 1:]
+            allowed_closing = "} " if is_last else ", "
+            if any(char not in allowed_closing for char in after_quote):
+                continue
+            if after_quote.count("}") > 1 or after_quote.count(",") > 1:
+                continue
+        allowed_ids.append(token_id)
+    return allowed_ids
 
-
-def get_valid_tokens(logits: List[float], valid_id: Set[int]) -> int:
-    """Finds the token ID from valid_id that has the highest score in logits.
-
-    Args:
-        logits (List[float]): The raw prediction scores from the model.
-        valid_id (Set[int]): The set of allowed token IDs.
-
-    Returns:
-        int: The selected token ID with the maximum logit score.
-    """
-    return max(valid_id, key=lambda i: logits[i] if i < len(logits)
-               else float('-inf'))
-
-
-def build_json_valid_ids(vocab: Dict[str, int]) -> Set[int]:
-    """Filters the vocabulary to keep only JSON-safe tokens.
-
-    Args:
-        vocab (Dict[str, int]): The vocabulary mapping token strings to IDs.
-
-    Returns:
-        Set[int]: A set of valid token IDs that contain only safe characters.
-    """
-    up = "abcdefghijklmnopqrstuvwxyz".upper()
-    json_safe = set(
-        up + 'abcdefghijklmnopqrstuvwxyz''0123456789*_,.:-+\\/?()[]{}"ĠĊ')
-    valid = set()
-    for token_str, token_id in vocab.items():
-        if token_str and all(c in json_safe for c in token_str):
-            valid.add(token_id)
-    return valid
-
-
-def load_vocab(model: Small_LLM_Model) -> Dict[str, int]:
-    """Loads the raw vocabulary dictionary from the model's tokenizer file.
-
-    Args:
-        model (Small_LLM_Model): The model instance providing the
-        tokenizer path.
-
-    Returns:
-        Dict[str, int]: The raw vocabulary dictionary.
-    """
-    vocab_path = model.get_path_to_tokenizer_file()
-    with open(vocab_path, "r", encoding="utf-8") as f:
-        tok_data = json.load(f)
-    raw_vocab = tok_data.get("model", {}).get("vocab", {})
-    return dict(raw_vocab)
-
-
-def cast_numbers_to_float(params_dict: dict) -> dict:
-    """Forces all numerical integers to floats
-    to satisfy strict evaluation types."""
-    if not isinstance(params_dict, dict):
-        return params_dict
-
-    for key, val in params_dict.items():
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            params_dict[key] = float(val)
-    return params_dict
-
-
-def build_system_prompt(func: List[Any]) -> str:
-    """Builds the system prompt containing
-    instructions and available functions.
-
-    Args:
-        func (List[Any]): A list of available function definitions.
-
-    Returns:
-        str: The formatted system prompt.
-    """
-    
-    lines = ['tools\n{"name":"']
-    for fn in func:
-        params = ", ".join(
-            f"{name}: {info.type}"
-            for name, info in fn.parameters.items()
-        )
-        lines.append(f"  -{fn.name}({params}): {fn.description}")
-    return "\n".join(lines)
+def build_clean_vocab(model: Small_LLM_Model) -> dict[int, str]:
+    vocabulary = dict()
+    with open(model.get_path_to_vocab_file(), "r") as f:
+        vocabulary = json.load(f)
+    clean_vocab: dict[int, str] = {}
+    for _, token_id in vocabulary.items():
+        clean_vocab[token_id] = model.decode(token_id)
+    return clean_vocab
+def get_tokens_allowed_ids(
+    clean_vocab: dict[int, str], gen: str, list_target: list[str]
+):
+    allowed_ids = []
+    for token_id, token_text in clean_vocab.items():
+        text_target = gen + token_text
+        for target in list_target:
+            if target.startswith(text_target):
+                allowed_ids.append(token_id)
+                break
+    return allowed_ids
