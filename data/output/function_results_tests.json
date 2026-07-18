@@ -1,33 +1,9 @@
 [
     {
-        "prompt": "What is the sum of 2 and 3?",
-        "name": "fn_add_numbers",
+        "prompt": "waht is the weather in casablanca",
+        "name": "fn_format_template",
         "parameters": {
-            "a": 2.0,
-            "b": 3.0
+            "template": "weather: {name}, {city} is {temperature} degrees Celsius."
         }
-    },
-    {
-        "prompt": "What is the sum of 265 and 345?",
-        "name": "fn_add_numbers",
-        "parameters": {
-            "a": 265.0,
-            "b": 345.0
-        }
-    },
-    {
-        "prompt": "Greet shrek",
-        "name": null,
-        "parameters": {}
-    },
-    {
-        "prompt": "Greet john",
-        "name": null,
-        "parameters": {}
-    },
-    {
-        "prompt": "Reverse the string 'hello'",
-        "name": null,
-        "parameters": {}
     }
 ]
