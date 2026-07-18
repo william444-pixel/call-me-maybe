@@ -1,14 +1,16 @@
 from llm_sdk.llm_sdk import Small_LLM_Model
 import json
-from typing import Any, Dict, List, Optional, Set
+# from typing import Any, Dict, List, Optional, Set
 import numpy as np
 
 
-def get_mask_logits(allowed_ids, logits):
+def get_mask_logits(allowed_ids: list[int], logits: list[float])\
+      -> list[float]:
     mask_logits = np.full_like(logits, -np.inf)
     for allowed_id in allowed_ids:
         mask_logits[allowed_id] = logits[allowed_id]
-    return mask_logits
+    return mask_logits  # type: ignore[return-value]
+
 
 def get_allowed_ids_for_numbers(
     clean_vocab: dict[int, str], is_last: bool
@@ -25,6 +27,7 @@ def get_allowed_ids_for_numbers(
         if all(char in allowed_chars for char in token_text):
             allowed_ids.append(token_id)
     return allowed_ids
+
 
 def get_allowed_ids_for_strings(
     clean_vocab: dict[int, str], is_last: bool
@@ -49,6 +52,7 @@ def get_allowed_ids_for_strings(
         allowed_ids.append(token_id)
     return allowed_ids
 
+
 def build_clean_vocab(model: Small_LLM_Model) -> dict[int, str]:
     vocabulary = dict()
     with open(model.get_path_to_vocab_file(), "r") as f:
@@ -57,9 +61,11 @@ def build_clean_vocab(model: Small_LLM_Model) -> dict[int, str]:
     for _, token_id in vocabulary.items():
         clean_vocab[token_id] = model.decode(token_id)
     return clean_vocab
+
+
 def get_tokens_allowed_ids(
     clean_vocab: dict[int, str], gen: str, list_target: list[str]
-):
+) -> list[int]:
     allowed_ids = []
     for token_id, token_text in clean_vocab.items():
         text_target = gen + token_text

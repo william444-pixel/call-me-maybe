@@ -2,6 +2,7 @@ import json
 import argparse
 import os
 import time
+from typing import Any
 from llm_sdk.llm_sdk import Small_LLM_Model
 import numpy as np
 from src.json_loaders import load_function_definition, load_prompt
@@ -12,6 +13,7 @@ from src.constrained_decoding import (
     build_clean_vocab,
     get_tokens_allowed_ids,
 )
+
 
 def arg_parser() -> argparse.Namespace:
     parse = argparse.ArgumentParser(
@@ -31,22 +33,23 @@ def arg_parser() -> argparse.Namespace:
     parse.add_argument("--model", type=str, default="Qwen/Qwen3-0.6B")
     return parse.parse_args()
 
-def main():
+
+def main() -> None:
     args = arg_parser()
     total_start = time.perf_counter()
     final_results = []
     list_alloweds_of_functions = []
-    schema_parameters = {}
+    schema_parameters: dict[str, Any] = {}
 
     functions_tools_list = load_function_definition(args.functions_definition)
     prompts_list = load_prompt(args.input)
-    
+
     for funcobj in functions_tools_list:
         func_name = funcobj.name
         list_alloweds_of_functions.append(func_name)
-        
+
     list_of_functions = {fn.name: fn for fn in functions_tools_list}
-    
+
     model = Small_LLM_Model()
     clean_vocab = build_clean_vocab(model)
 
@@ -65,16 +68,16 @@ def main():
         prompt = "Tools:\n"
         prompt += f"{tools}\n"
         prompt += "- Be extremely precise with strings and regex patterns\n"
-        prompt += 'Example:\n{"name":"function-name","parameters":<arguments>}\n'
+        prompt += 'Example:\n{"name":"function-name","parameters"'
+        ':<arguments>}\n'
         prompt += f"User:{raw_prompt_text}\nAssistent:\n"
         prompt += '{"name":"'
 
         tokens: list = model.encode(prompt)[0].tolist()
         gen = ""
         state = "FUNCTION_NAME"
-        
+
         matched_function_name = ""
-        remaining_parameters = []
         current_key = ""
 
         while state != "END":
@@ -100,21 +103,20 @@ def main():
                         allowed_ids = get_allowed_ids_for_numbers(
                             clean_vocab, is_last_param
                         )
-                    
-
             masked_logits = get_mask_logits(allowed_ids, logits)
             next_token = int(np.argmax(masked_logits))
             tokens.append(next_token)
             gen += clean_vocab[next_token]
-
-
-            print(f"[{state}] -> Added: {repr(clean_vocab[next_token])} | Current gen: '{gen}'")
+            print(f"[{state}] -> Added: {repr(clean_vocab[next_token])}"
+                  " | Current gen: '{gen}'")
             # --- DFA STATE TRANSITION MACHINE ---
             if state == "FUNCTION_NAME":
                 if gen in list_alloweds_of_functions:
                     tokens.extend(parametre_injection)
                     matched_function_name = gen
-                    schema_parameters = list_of_functions[matched_function_name].parameters.copy()
+                    schema_parameters = \
+                        list_of_functions[matched_function_name]\
+                        .parameters.copy()
                     gen = ""
                     state = "PARAM_KEY"
 
@@ -153,7 +155,8 @@ def main():
         result_raw = model.decode(tokens)
 
         try:
-            json_start_index = result_raw.find(f'"name":"{matched_function_name}"')
+            json_start_index = result_raw.find(f'"name":\
+                                               "{matched_function_name}"')
             if json_start_index == -1:
                 raise ValueError("JSON start object not found.")
 
@@ -185,7 +188,8 @@ def main():
             print(f"[-] CRITICAL ERROR on prompt: {raw_prompt_text}")
             print(f"Error details: {e}")
             final_results.append(
-                {"prompt": json.loads(raw_prompt_text), "name": None, "parameters": {}}
+                {"prompt": json.loads(raw_prompt_text),
+                 "name": None, "parameters": {}}
             )
 
     output_path = args.output
