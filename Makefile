@@ -18,5 +18,5 @@ clean:
 	find . -type d \( -name "__pycache__" -o -name ".mypy_cache" \) -exec rm -rf {} +
 
 lint:
-	flake8 $(SRC_DIR)
+	uv run flake8 $(SRC_DIR)
 	uv run mypy src $(MYPY_FLAGS)
